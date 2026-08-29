@@ -1,30 +1,41 @@
 package com.vivek.platform.subscription.domain;
 
 import jakarta.persistence.*;
+
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "subscriptions")
+@Table(name = "subscriptions",
+        indexes = @Index(name = "idx_subscriptions_org_status", columnList = "organization_id, status"))
 public class SubscriptionEntity {
 
     @Id
     @GeneratedValue
     private UUID id;
 
-    @ManyToOne(optional = false)
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "organization_id", nullable = false)
     private OrganizationEntity organization;
 
-    @ManyToOne(optional = false)
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "plan_id", nullable = false)
     private PlanEntity plan;
 
-    @Column(nullable = false)
+    @Column(name = "start_date", nullable = false)
     private Instant startDate;
 
+    /** Effective end of service. Null while the subscription runs indefinitely. */
+    @Column(name = "end_date")
     private Instant endDate;
 
-    @Column(nullable = false)
-    private boolean active;
+    /** When the customer asked to cancel, which is not the same as when service stops. */
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private SubscriptionStatus status = SubscriptionStatus.ACTIVE;
 
     public UUID getId() {
         return id;
@@ -62,11 +73,30 @@ public class SubscriptionEntity {
         this.endDate = endDate;
     }
 
-    public boolean isActive() {
-        return active;
+    public Instant getCancelledAt() {
+        return cancelledAt;
     }
 
-    public void setActive(boolean active) {
-        this.active = active;
+    public void setCancelledAt(Instant cancelledAt) {
+        this.cancelledAt = cancelledAt;
+    }
+
+    public SubscriptionStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(SubscriptionStatus status) {
+        this.status = status;
+    }
+
+    /**
+     * A subscription is billable while ACTIVE or PAST_DUE, and while a CANCELLED subscription
+     * has not yet reached its effective end date.
+     */
+    public boolean isBillableAt(Instant moment) {
+        if (status == SubscriptionStatus.CANCELLED) {
+            return endDate != null && moment.isBefore(endDate);
+        }
+        return true;
     }
 }

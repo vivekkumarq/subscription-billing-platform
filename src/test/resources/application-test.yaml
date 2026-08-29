@@ -1,0 +1,45 @@
+spring:
+  datasource:
+    # One in-memory database shared by the integration tests. Flyway migrates it once; tests
+    # create their own tenants with unique names rather than relying on a clean table.
+    url: jdbc:h2:mem:subdb-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/common
+    clean-disabled: false
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # A jwk-set-uri builds the decoder without any network call at startup, unlike
+          # issuer discovery. Tests authenticate with the jwt() post-processor, which bypasses
+          # decoding entirely, so this endpoint is never actually contacted.
+          jwk-set-uri: http://localhost:0/.well-known/jwks.json
+
+  kafka:
+    bootstrap-servers: ${spring.embedded.kafka.brokers:localhost:9092}
+
+billing:
+  default-overage-rate: 0.10
+  currency: USD
+  quota-alert-thresholds:
+    - 80
+    - 100
+
+logging:
+  level:
+    org.apache.kafka: WARN
+    kafka: WARN
+    org.apache.zookeeper: WARN
+    state.change.logger: WARN
+    com.vivek.platform.subscription: INFO

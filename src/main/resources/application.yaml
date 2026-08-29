@@ -1,32 +1,130 @@
 spring:
+  application:
+    name: subscription-service
+  profiles:
+    default: dev
+
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8081/realms/saas-platform
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/saas-platform}
+
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        # Producer-side idempotence: no duplicate records from internal retries.
+        enable.idempotence: true
+        spring.json.add.type.headers: false
     consumer:
       group-id: subscription-service
       auto-offset-reset: earliest
+      enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: "com.vivek.platform.*"
+        spring.json.trusted.packages: "com.vivek.platform.subscription.events"
+    listener:
+      # Offsets are committed only after the listener returns, so a crash re-delivers rather
+      # than silently dropping. The consumer is idempotent, so redelivery is safe.
+      ack-mode: record
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema is owned by Flyway, not by Hibernate. `ddl-auto: update` was never safe for a
+      # deployed environment - it silently mutates production tables on startup.
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          # Batch writes so a burst of usage events is not one round trip per row.
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: subscription-service
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+billing:
+  # Fallback overage price per unit; a plan may override it with its own rate.
+  default-overage-rate: ${BILLING_DEFAULT_OVERAGE_RATE:0.10}
+  currency: ${BILLING_CURRENCY:USD}
+  quota-alert-thresholds:
+    - 80
+    - 100
+
+logging:
+  level:
+    com.vivek.platform.subscription: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
   datasource:
-    url: jdbc:h2:mem:subdb
+    url: jdbc:h2:mem:subdb;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
     username: sa
     password:
-
   jpa:
-    hibernate:
-      ddl-auto: update
     show-sql: true
-
   h2:
     console:
       enabled: true
+  flyway:
+    locations: classpath:db/migration/common
+
+logging:
+  level:
+    com.vivek.platform.subscription: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/subscription}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:subscription}
+    password: ${DB_PASSWORD:subscription}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  jpa:
+    show-sql: false
+  h2:
+    console:
+      enabled: false
+  flyway:
+    locations: classpath:db/migration/common

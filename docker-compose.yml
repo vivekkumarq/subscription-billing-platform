@@ -1,9 +1,132 @@
+name: subscription-billing-platform
+
 services:
+
+  # ---------------------------------------------------------------- database
+  postgres:
+    image: postgres:16-alpine
+    container_name: sbp-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-subscription}
+      POSTGRES_USER: ${POSTGRES_USER:-subscription}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-subscription}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Creates the separate database Keycloak stores its own state in.
+      - ./infra/postgres/init-keycloak-db.sh:/docker-entrypoint-initdb.d/init-keycloak-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-subscription} -d ${POSTGRES_DB:-subscription}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [sbp]
+
+  # ------------------------------------------------------------------- kafka
+  # KRaft mode: the broker is its own controller, so there is no ZooKeeper.
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: sbp-kafka
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka:29092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks: [sbp]
+
+  # ---------------------------------------------------------------- keycloak
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
-    command: start-dev
+    container_name: sbp-keycloak
+    command: ["start-dev", "--import-realm"]
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-subscription}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-subscription}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_PORT: 8080
     ports:
-      - "8081:8080"
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The Keycloak image has no curl or wget, so this uses bash's /dev/tcp redirection
+      # against the management port that serves the readiness probe.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    networks: [sbp]
+
+  # -------------------------------------------------------------------- app
+  subscription-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sbp-subscription-service
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-subscription}
+      DB_USERNAME: ${POSTGRES_USER:-subscription}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-subscription}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # Keycloak must be reachable at the SAME issuer URL the token was minted with, so the
+      # container joins the host alias below rather than using the internal hostname.
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://keycloak:8080/realms/saas-platform}
+      BILLING_DEFAULT_OVERAGE_RATE: ${BILLING_DEFAULT_OVERAGE_RATE:-0.10}
+      BILLING_CURRENCY: ${BILLING_CURRENCY:-USD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      # Started, not healthy: the resource server resolves the issuer lazily on the first
+      # authenticated request, so it does not need Keycloak to be ready in order to boot.
+      keycloak:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks: [sbp]
+
+volumes:
+  postgres-data:
+  kafka-data:
+
+networks:
+  sbp:
+    driver: bridge

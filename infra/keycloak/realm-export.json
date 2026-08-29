@@ -1,0 +1,124 @@
+{
+  "realm": "saas-platform",
+  "enabled": true,
+  "displayName": "SaaS Platform",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 3600,
+  "roles": {
+    "realm": [
+      {
+        "name": "PLATFORM_ADMIN",
+        "description": "May provision tenants and reach every organization"
+      },
+      {
+        "name": "TENANT_USER",
+        "description": "May act only on the organization named by the org_id claim"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "subscription-api",
+      "name": "Subscription API demo client",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost:8081/*"
+      ],
+      "webOrigins": ["*"],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
+      "protocolMappers": [
+        {
+          "name": "org_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "org_id",
+            "claim.name": "org_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "org_ids",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "org_ids",
+            "claim.name": "org_ids",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "platform-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["PLATFORM_ADMIN"]
+    },
+    {
+      "username": "acme-user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Acme",
+      "lastName": "Tenant",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "acme123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["TENANT_USER"],
+      "attributes": {
+        "org_id": ["00000000-0000-0000-0000-000000000000"]
+      }
+    },
+    {
+      "username": "globex-user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Globex",
+      "lastName": "Tenant",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "globex123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["TENANT_USER"],
+      "attributes": {
+        "org_id": ["11111111-1111-1111-1111-111111111111"]
+      }
+    }
+  ]
+}
