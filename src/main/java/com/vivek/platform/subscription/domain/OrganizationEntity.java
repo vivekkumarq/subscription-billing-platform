@@ -1,21 +1,23 @@
 package com.vivek.platform.subscription.domain;
 
 import jakarta.persistence.*;
+
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "organizations")
+@Table(name = "organizations",
+        uniqueConstraints = @UniqueConstraint(name = "uk_organizations_name", columnNames = "name"))
 public class OrganizationEntity {
 
     @Id
     @GeneratedValue
     private UUID id;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, length = 255)
     private String name;
 
-    @Column(nullable = false)
+    @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
     public UUID getId() {
