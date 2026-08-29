@@ -371,9 +371,14 @@ No Docker, no Kafka, no Keycloak. Useful for working on the domain logic.
 ```
 
 The `dev` profile uses H2 in memory (JDBC URL `jdbc:h2:mem:subdb`, user `sa`, no password) and
-Flyway applies the same migration it applies to PostgreSQL. The Kafka producer and consumer log
-connection warnings until a broker is available at `localhost:9092`; every synchronous endpoint
-still works.
+Flyway applies the same migration it applies to PostgreSQL.
+
+With no broker running, the service still starts and every synchronous endpoint works — only
+`POST /usage-events`, which publishes to Kafka, has nowhere to send its message. Startup takes
+about a minute in that state, because the Kafka admin client spends roughly 40 seconds trying to
+provision its topics before giving up with `Could not configure topics` and continuing. The
+warnings are expected; the service is healthy once `Started SubscriptionServiceApplication`
+appears.
 
 To point a locally-run service at the Dockerised infrastructure:
 
@@ -921,7 +926,7 @@ Exposed at `/actuator/prometheus` alongside the standard JVM, HTTP and Hikari me
 | `usage_events_consumed_total` | counter | Usage events consumed and persisted |
 | `usage_events_duplicate_total` | counter | Redeliveries skipped by the idempotency check |
 | `billing_invoices_generated_total` | counter | Invoices issued |
-| `billing_revenue_total_total` | counter | Cumulative invoiced revenue (tagged `currency`) |
+| `billing_revenue_total` | counter | Cumulative invoiced revenue (tagged `currency`) |
 | `billing_quota_alerts_total` | counter | Quota threshold alerts emitted |
 
 ---
